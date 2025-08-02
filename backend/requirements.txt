@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+langchain-openai
+langchain-google-genai
+langgraph
+python-dotenv
+requests
+unidiff
+aiohttp
+tavily-python
+google-generativeai
