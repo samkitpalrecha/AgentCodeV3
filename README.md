@@ -119,6 +119,10 @@ AgentCodeV3/
 
 ---
 
+![alt text](image.png)
+
+---
+
 ## Limitations
 
 - Only the first 10 files/folders are indexed here. See [full repo](https://github.com/samkitpalrecha/AgentCodeV3) for all files, including likely additional backend logic (API endpoints, planner, developer, validator, etc.).
