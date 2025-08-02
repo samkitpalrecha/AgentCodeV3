@@ -1,166 +1,129 @@
-# AgentCodeV2
+# AgentCodeV3
 
-AgentCodeV2 is an AI-augmented browser-based Python IDE that empowers users to write, analyze, and transform Python code interactively. It integrates modern frontend technologies with an intelligent agent backend, providing not just code execution but also automated code editing, planning, and stepwise modification using large language models and code analysis tools.
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Architecture Overview](#architecture-overview)
-- [How It Works](#how-it-works)
-- [Folder Structure & Purpose](#folder-structure--purpose)
-- [Getting Started](#getting-started)
-- [Usage](#usage)
-- [Future Improvements](#future-improvements)
+AgentCodeV3 is an experimental, agent-powered browser Python IDE with AI assistance. It integrates a frontend for interactive Python coding with a backend for code triage, planning, and AI-driven code improvement, powered by LLMs.
 
 ---
 
-## Features
+## Deep Project Structure & File-by-File Purpose
 
-- Monaco Editor with Python syntax highlighting.
-- One-click code execution using Pyodide (Python in WebAssembly).
-- AI "Agent" to analyze, plan, and modify code based on user instructions.
-- Output console for execution results and errors.
-- Toolbar with Run, Debug, Test, and Explain (expanding in future).
-- Split-screen layout: Editor on left, output and agent interaction on right.
-- Modular backend supporting agentic workflows ("planner" and "developer" nodes).
-- Rich logging and error handling for agent processes.
+**Note: This is based on a code search limited to 10 results. More files and internal logic may exist. [View the full repo for all files.](https://github.com/samkitpalrecha/AgentCodeV3)**
 
 ---
 
-## Architecture Overview
-
-AgentCodeV2 consists of two main components:
-
-1. **Frontend (React + Monaco Editor)**  
-   - Users write code and interact with the AI agent via the browser.
-   - Handles code editing, sending instructions to the agent, and displaying output/results.
-
-2. **Backend (FastAPI + LangChain + Gemini LLM)**  
-   - Receives code and natural language instructions.
-   - Runs an agentic workflow:
-     - **Planner**: Analyzes the instruction, breaks it into executable plan steps.
-     - **Developer**: Applies each plan step as a code diff, using LLM-generated patches.
-   - Maintains code history and returns the full plan and the modified code.
+### Root
+- **README.md**: This file.
+- **.gitignore**: Specifies intentionally untracked files to ignore.
+- (Potential additional files not listed here.)
 
 ---
 
-## How It Works
+### backend/
+#### Purpose: Python backend for agentic code triage, planning, and improvement.
 
-1. **User Interaction**:  
-   The user writes Python code in the browser and issues a high-level instruction (e.g., "Add a function to sort a list").
-   
-2. **Agent Flow**:
-   - The instruction and current code are sent to the backend via `callAgent()` in the frontend.
-   - The backend agent graph runs:
-     - **Planner node**: Uses LLM and code search tools to create a stepwise plan.
-     - **Developer node**: For each plan step, generates a code diff via LLM, applies it to the code, and updates history.
-   - The result (plan + modified code) is returned to the frontend.
-
-3. **Output**:
-   - The user can review the agent plan and the new code, and run it immediately in the browser using Pyodide.
-   - Execution output and errors are displayed in the output pane.
+- **main.py**  
+  Placeholder/test script. Currently just prints "dgfh".  
+  _Purpose: likely a stub or used for backend test runs._
+- **state.py**  
+  Defines the _core agent state and workflow data models_.  
+  - `PlanStep`: Individual step in agent's improvement plan; tracks action, reasoning, dependencies, status, tools used, and timestamps.
+  - `ExecutionMetrics`: Tracks backend agent performance (timing, search count, LLM calls, etc).
+  - `AgentState`: The main class for tracking an entire agentic workflow, including user instruction, code, agent route, complexity, plan steps, logs, feedback, working memory, and results.  
+  - `StepStatus`, `NodeType`: Enums for workflow node types/status.
+  _Purpose: All agent workflow logic and state for step-by-step code improvement flows._
+- **triage.py**  
+  Implements the _TriageAgent_:
+  - Classifies each user request to determine the right agent workflow and estimate complexity.
+  - Uses Gemini LLM for analysis (model: `gemini-2.5-flash`).
+  - Returns route (e.g., `simple_inquiry`, `simple_modification`, `complex_modification`, etc) and complexity score.
+  _Purpose: Frontline classifier to optimize and branch the agent workflow._
+- (Other backend files likely exist for API server, planner, developer, etc. See [repo](https://github.com/samkitpalrecha/AgentCodeV3) for more.)
 
 ---
 
-## Folder Structure & Purpose
+### frontend/
+#### Purpose: React-based web IDE for multi-file Python editing, execution, and agent-assisted improvement.
+
+- **index.html**  
+  Loads the React app, injects Pyodide (Python-to-WASM runtime), and defines the root div for mounting the UI.  
+  _Purpose: Browser entry point; enables in-browser Python._
+- **vite.config.js**  
+  Frontend dev/build config (Vite).  
+  - Proxies `/api` requests to the backend (assumes FastAPI on :8000).
+- **src/main.jsx**  
+  Entrypoint for React app.
+  - Imports global styles, mounts `<App />` into `#root`.
+- **src/App.jsx**  
+  Main React component.  
+  - Manages state: open files, active file/view, output, loading/streaming status, agent progress.
+  - Integrates:
+    - `CodeEditor`, `Toolbar`, `AgentPanel`, `OutputPane`, `ActivityBar`, `FileExplorer` (in `/components`)
+    - `runPython` (Pyodide runner utility)
+    - `callAgent`, `streamAgentExecution` (API utilities for backend agent)
+  - Handles user actions: running code, launching agent, updating files, streaming agent UI.
+  _Purpose: Orchestrates all frontend logic and agent interaction._
+- **src/components/Toolbar.jsx**  
+  Toolbar UI:  
+  - "Run" button (executes code via Pyodide)
+  - "Debug" and "Test" buttons (present, currently disabled)
+  _Purpose: Fast access to core code actions._
+- **src/App.css, src/index.css**  
+  Application styles.  
+  - Layout, theming, buttons, responsiveness, color modes.
+  _Purpose: Consistent, modern UI/UX._
+- (Other `/src/components/` files exist: `CodeEditor`, `AgentPanel`, `OutputPane`, `ActivityBar`, `FileExplorer`—see the repo for details.)
+
+---
+
+## Typical File Hierarchy (Partial)
 
 ```
-AgentCodeV2/
-├── backend/       # Python backend (FastAPI, LangChain, agent logic)
-│   ├── agent_graph.py    # Orchestrates planner/developer flow using a state graph
-│   ├── developer.py      # Developer node: applies LLM-generated code diffs
-│   ├── planner.py        # Planner node: creates multi-step implementation plans
-│   ├── tools.py          # Utilities: code search, diffing, LLM integration
-│   ├── server.py         # FastAPI server exposing /agent endpoint
-│   └── state.py          # Data models for agent state
+AgentCodeV3/
+├── backend/
+│   ├── main.py
+│   ├── state.py
+│   ├── triage.py
+│   └── (other agent/LLM/server/planner files)
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   └── AgentPanel.jsx   # Main UI for agent interaction
-│   │   ├── utils/
-│   │   │   └── agentClient.js   # API client for communicating with the backend agent
-│   │   └── ...                  # Other React code (App.jsx, etc.)
-├── public/            # Static assets
-├── package.json       # Frontend dependencies
-├── vite.config.js     # Frontend build config
-└── README.md
+│   ├── index.html
+│   ├── vite.config.js
+│   └── src/
+│        ├── main.jsx
+│        ├── App.jsx
+│        ├── App.css
+│        ├── index.css
+│        └── components/
+│             ├── Toolbar.jsx
+│             └── (CodeEditor.jsx, AgentPanel.jsx, ...)
+├── README.md
+└── .gitignore
 ```
-
-### Key File Purposes
-
-- **backend/agent_graph.py**: Defines the agent workflow as a state machine, coordinating planner and developer nodes.
-- **backend/developer.py**: Handles the application of each plan step as a code diff, invoking LLMs and maintaining code history.
-- **backend/planner.py**: Breaks down user instructions into stepwise plans.
-- **backend/tools.py**: Provides code search (internal/external), patching, and LLM orchestration.
-- **frontend/src/components/AgentPanel.jsx**: UI for sending code/instructions to the agent and viewing responses.
-- **frontend/src/utils/agentClient.js**: Handles HTTP requests to the backend agent API.
 
 ---
 
-## Getting Started
+## Backend: Agent Architecture (Based on Code)
 
-### Prerequisites
-
-- Node.js (for frontend)
-- Python 3.9+ (for backend)
-- Git
-
-### Setup Instructions
-
-**1. Clone the repository:**
-```sh
-git clone https://github.com/samkitpalrecha/AgentCodeV2.git
-cd AgentCodeV2
-```
-
-**2. Install frontend dependencies:**
-```sh
-cd frontend
-npm install
-```
-
-**3. Install backend dependencies:**
-```sh
-cd ../backend
-pip install -r requirements.txt
-```
-
-**4. Start the backend server:**
-```sh
-uvicorn server:app --reload
-```
-
-**5. Start the frontend (in a separate terminal):**
-```sh
-cd ../frontend
-npm run dev
-```
-
-**6. Open the app in your browser:**  
-Go to [http://localhost:5173](http://localhost:5173)
+- **AgentState** tracks the whole agentic process: from user instruction, through triage, step planning, execution, and result collation.
+- **TriageAgent** runs first, selecting the optimal workflow branch and estimating complexity.
+- **PlanStep** objects represent each atomic code change, refactor, or analysis the agent makes.
+- **ExecutionMetrics** and logs allow for debugging and performance analysis.
+- **LLM Integration** (Gemini) is used for route selection and likely also for code generation/planning in other modules.
 
 ---
 
-## Usage
+## Frontend: IDE Architecture
 
-- **Write code** in the editor panel.
-- **Click "Run"** to execute Python code using Pyodide in your browser.
-- **Use the Agent Panel** to give high-level instructions (e.g., "Refactor this code", "Add error handling").
-- **Review the agent's plan** and code modifications step by step.
-- **Debug, Test, and Explain** features are under development.
+- **Multi-file support**: Open, edit, and switch between several Python files.
+- **Immediate run**: Code executes in-browser (WASM, no backend required for code execution).
+- **Agent streaming**: Agent improvements are streamed stepwise to the frontend, showing progress and output in real time.
+- **Componentized UI**: Clear separation for editor, output, files, toolbar, and agent interactions.
+
+---
+
+## Limitations
+
+- Only the first 10 files/folders are indexed here. See [full repo](https://github.com/samkitpalrecha/AgentCodeV3) for all files, including likely additional backend logic (API endpoints, planner, developer, validator, etc.).
+- This README is as semantically deep and accurate as possible given public code context.
 
 ---
 
-## Future Improvements
-
-- Implement real logic for Debug, Test, and Explain in the UI.
-- Support for multi-file editing and project-level operations.
-- Keyboard shortcuts for faster agent/code execution.
-- Theme customization and enhanced layout.
-- Richer agent output (explanations, suggestions, and auto-rollback).
-- Integrate more advanced LLM models and plug in user-specified LLM backends.
-- Persistent saving/loading of user code and agent results.
-
----
+For complete structure and code, [browse the full repository](https://github.com/samkitpalrecha/AgentCodeV3).
