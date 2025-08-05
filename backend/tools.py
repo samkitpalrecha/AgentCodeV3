@@ -6,19 +6,18 @@ import asyncio
 import aiohttp
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import logging
 from difflib import unified_diff
 import subprocess
 
 # External API imports
-import requests
 from tavily import TavilyClient
 import google.generativeai as genai
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
@@ -33,7 +32,7 @@ class SearchResult:
     url: Optional[str] = None
     relevance_score: float = 0.0
     source_type: str = "unknown"  # internal, external, scraped
-    
+
 @dataclass
 class CodeChange:
     """Represents a single code change/diff"""
@@ -41,357 +40,194 @@ class CodeChange:
     original_content: str
     modified_content: str
     change_description: str
-    line_start: int
-    line_end: int
-    timestamp: datetime
+    timestamp: datetime = field(default_factory=datetime.now)
 
 class ToolManager:
     """Advanced tool manager for AgentCodeV2"""
-    
+
     def __init__(self):
         self.setup_apis()
-        self.workspace_path = Path("./")  # Current working directory
+        self.workspace_path = Path("./workspace")
+        self.workspace_path.mkdir(exist_ok=True)
         self.code_history: List[CodeChange] = []
-        
-    def setup_apis(self):
-        """Initialize external API clients"""
-        try:
-            # Gemini setup
-            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-            
-            # Tavily setup for external search
-            self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-            
-            # Firecrawl setup
-            self.firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
-            self.firecrawl_base_url = "https://api.firecrawl.dev/v0"
-            
-            logger.info("All API clients initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Error setting up APIs: {e}")
-            raise
 
-    async def search_internal(self, query: str, file_types: List[str] = [".py", ".js", ".jsx", ".md"]) -> List[SearchResult]:
-        """
-        Search internal workspace/repository for relevant code and files
+    def setup_apis(self):
+        """Initialize API clients"""
+        self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        logger.info("API clients initialized with gemini-2.5-flash")
+
+    async def search_internal(self, query: str, file_types: List[str] = None) -> List[SearchResult]:
+        """Search for files and content within the local workspace using ripgrep."""
+        if file_types is None:
+            file_types = [".py", ".js", ".jsx", ".md", ".html", ".css"]
         
-        Args:
-            query: Search query
-            file_types: File extensions to search in
-            
-        Returns:
-            List of SearchResult objects
-        """
-        logger.info(f"Internal search for: {query}")
-        results = []
-        
+        logger.info(f"Initiating internal search for: '{query}'")
         try:
-            # Search in current workspace
-            for file_path in self.workspace_path.rglob("*"):
-                if file_path.is_file() and file_path.suffix in file_types:
+            cmd = ['rg', '--json', query, str(self.workspace_path)]
+            
+            # Use asyncio.to_thread to run the synchronous subprocess in a non-blocking way
+            def run_subprocess():
+                return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+            process = await asyncio.to_thread(run_subprocess)
+
+            if process.returncode != 0 and not process.stdout:
+                if process.stderr:
+                    logger.error(f"ripgrep error: {process.stderr}")
+                return []
+
+            results = []
+            for line in process.stdout.strip().split('\n'):
+                if line:
                     try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            
-                        # Simple text search (can be enhanced with fuzzy matching)
-                        if query.lower() in content.lower():
-                            # Calculate relevance score
-                            query_count = content.lower().count(query.lower())
-                            relevance_score = min(query_count / 10.0, 1.0)
-                            
-                            # Extract relevant snippet
-                            lines = content.split('\n')
-                            relevant_lines = []
-                            for i, line in enumerate(lines):
-                                if query.lower() in line.lower():
-                                    start = max(0, i-2)
-                                    end = min(len(lines), i+3)
-                                    relevant_lines.extend(lines[start:end])
-                                    break
-                            
-                            snippet = '\n'.join(relevant_lines)
-                            
+                        data = json.loads(line)
+                        if data['type'] == 'match':
+                            file_path = data['data']['path']['text']
+                            content = data['data']['lines']['text']
                             results.append(SearchResult(
-                                title=f"Code in {file_path.name}",
-                                content=snippet,
-                                url=str(file_path),
-                                relevance_score=relevance_score,
-                                source_type="internal"
+                                title=file_path,
+                                content=content,
+                                source_type='internal'
                             ))
-                            
-                    except Exception as e:
-                        logger.warning(f"Error reading {file_path}: {e}")
-                        continue
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse ripgrep output line: {line}")
             
-            # Also search in code history
-            for change in self.code_history:
-                if query.lower() in change.change_description.lower() or \
-                   query.lower() in change.modified_content.lower():
-                    results.append(SearchResult(
-                        title=f"Previous change in {change.file_path}",
-                        content=change.change_description + "\n" + change.modified_content[:500],
-                        relevance_score=0.8,
-                        source_type="internal_history"
-                    ))
-            
-            # Sort by relevance
-            results.sort(key=lambda x: x.relevance_score, reverse=True)
-            logger.info(f"Found {len(results)} internal results")
-            
-            return results[:10]  # Return top 10 results
-            
+            logger.info(f"Internal search found {len(results)} results.")
+            return results
+
+        except FileNotFoundError:
+            logger.error("ripgrep (rg) is not installed or not in PATH. Internal search is unavailable.")
+            return []
         except Exception as e:
-            logger.error(f"Error in internal search: {e}")
+            logger.error(f"An unexpected error occurred during internal search: {e}", exc_info=True)
             return []
 
     async def search_external(self, query: str, max_results: int = 5) -> List[SearchResult]:
-        """
-        Search external sources using Tavily API
-        
-        Args:
-            query: Search query
-            max_results: Maximum number of results to return
-            
-        Returns:
-            List of SearchResult objects
-        """
-        logger.info(f"External search for: {query}")
-        
+        """Search external sources using Tavily."""
+        logger.info(f"Initiating external search for: '{query}'")
         try:
-            # Use Tavily for external search
-            search_result = self.tavily_client.search(
+            response = await asyncio.to_thread(
+                self.tavily_client.search,
                 query=query,
                 search_depth="advanced",
-                max_results=max_results,
-                include_domains=["github.com", "stackoverflow.com", "docs.python.org", "pypi.org"]
+                max_results=max_results
             )
-            
-            results = []
-            for item in search_result.get('results', []):
-                results.append(SearchResult(
-                    title=item.get('title', 'No title'),
-                    content=item.get('content', '')[:1000],  # Truncate content
-                    url=item.get('url', ''),
-                    relevance_score=item.get('score', 0.5),
-                    source_type="external"
-                ))
-            
-            logger.info(f"Found {len(results)} external results")
+            results = [
+                SearchResult(
+                    title=res['title'],
+                    content=res['content'],
+                    url=res['url'],
+                    relevance_score=res['score'],
+                    source_type='external'
+                ) for res in response['results']
+            ]
+            logger.info(f"External search found {len(results)} results.")
             return results
-            
         except Exception as e:
-            logger.error(f"Error in external search: {e}")
+            logger.error(f"An error occurred during external search: {e}", exc_info=True)
             return []
 
     async def scraper(self, url: str) -> Optional[str]:
-        """
-        Scrape full content from a URL using Firecrawl API
-        
-        Args:
-            url: URL to scrape
-            
-        Returns:
-            Scraped content as string or None if failed
-        """
+        """Scrape content from a given URL."""
         logger.info(f"Scraping URL: {url}")
-        
         try:
-            headers = {
-                'Authorization': f'Bearer {self.firecrawl_api_key}',
-                'Content-Type': 'application/json'
-            }
-            
-            payload = {
-                'url': url,
-                'formats': ['markdown'],
-                'onlyMainContent': True
-            }
-            
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.firecrawl_base_url}/scrape",
-                    headers=headers,
-                    json=payload
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        content = data.get('data', {}).get('markdown', '') or \
-                                data.get('data', {}).get('content', '')
-                        logger.info(f"Successfully scraped {len(content)} characters")
-                        return content
+                async with session.get(url, timeout=10) as response:
+                    response.raise_for_status()
+                    if "text/html" in response.headers.get("Content-Type", ""):
+                        return await response.text()
                     else:
-                        logger.error(f"Scraping failed with status {response.status}")
+                        logger.warning(f"Skipping non-HTML content at {url}")
                         return None
-                        
         except Exception as e:
-            logger.error(f"Error scraping {url}: {e}")
+            logger.error(f"Error scraping {url}: {e}", exc_info=True)
             return None
 
     async def internal_write(self, file_path: str, content: str, change_description: str = "") -> bool:
-        """
-        Write/update code files with change tracking
-        
-        Args:
-            file_path: Path to the file to write
-            content: New content to write
-            change_description: Description of the change
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        logger.info(f"Writing to file: {file_path}")
-        
+        """Write content to a file in the workspace, with backup and history."""
+        full_path = self.workspace_path / Path(file_path)
+        logger.info(f"Writing to file: {full_path}")
         try:
-            file_path_obj = Path(file_path)
-            
-            # Read original content if file exists
             original_content = ""
-            if file_path_obj.exists():
-                with open(file_path_obj, 'r', encoding='utf-8') as f:
-                    original_content = f.read()
-            
-            # Create directory if it doesn't exist
-            file_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Write new content
-            with open(file_path_obj, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # Track the change
+            if full_path.exists():
+                # Create a backup
+                backup_path = full_path.with_suffix(f"{full_path.suffix}.bak")
+                full_path.rename(backup_path)
+                logger.info(f"Backup created at: {backup_path}")
+                original_content = backup_path.read_text()
+
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content)
+
+            # Record the change
             change = CodeChange(
                 file_path=file_path,
                 original_content=original_content,
                 modified_content=content,
-                change_description=change_description,
-                line_start=1,
-                line_end=len(content.split('\n')),
-                timestamp=datetime.now()
+                change_description=change_description
             )
-            
             self.code_history.append(change)
-            logger.info(f"Successfully wrote {len(content)} characters to {file_path}")
             
+            logger.info(f"Successfully wrote to {full_path}")
             return True
-            
         except Exception as e:
-            logger.error(f"Error writing to {file_path}: {e}")
+            logger.error(f"Error writing to file {full_path}: {e}", exc_info=True)
             return False
 
-    def generate_diff(self, original: str, modified: str, filename: str = "file") -> str:
-        """Generate a unified diff between original and modified content"""
-        diff = list(unified_diff(
-            original.splitlines(keepends=True),
-            modified.splitlines(keepends=True),
-            fromfile=f"a/{filename}",
-            tofile=f"b/{filename}",
-            lineterm=""
-        ))
-        return ''.join(diff)
-
     async def analyze_code_with_llm(self, code: str, instruction: str) -> str:
-        """
-        Use Gemini to analyze code and provide insights
-        
-        Args:
-            code: Code to analyze
-            instruction: Analysis instruction
-            
-        Returns:
-            Analysis result as string
+        """Analyze a code snippet with an instruction using an LLM."""
+        logger.info("Analyzing code with LLM.")
+        prompt = f"""
+        Analyze the following code based on the user's instruction.
+
+        Instruction: {instruction}
+
+        Code:
+        ```
+        {code}
+        ```
+
+        Provide a concise analysis.
         """
         try:
-            prompt = f"""
-            You are an expert code analyst. Analyze the following code based on the instruction.
-            
-            Instruction: {instruction}
-            
-            Code:
-            ```
-            {code}
-            ```
-            
-            Provide a detailed analysis including:
-            1. Code structure and patterns
-            2. Potential improvements
-            3. Issues or bugs
-            4. Suggestions for the given instruction
-            
-            Analysis:
-            """
-            
-            response = self.gemini_model.generate_content(prompt)
-            return response.text
-            
+            response = await self.model.generate_content_async(prompt)
+            return response.text.strip()
         except Exception as e:
-            logger.error(f"Error in LLM analysis: {e}")
-            return "Analysis failed"
+            logger.error(f"Error during code analysis with LLM: {e}", exc_info=True)
+            return "Error: Could not analyze the code."
 
     def get_code_history(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent code change history"""
-        recent_changes = sorted(self.code_history, key=lambda x: x.timestamp, reverse=True)[:limit]
-        
+        """Get the history of code changes."""
+        logger.info(f"Retrieving last {limit} code changes.")
         return [
             {
                 "file_path": change.file_path,
-                "change_description": change.change_description,
-                "timestamp": change.timestamp.isoformat(),
-                "diff": self.generate_diff(change.original_content, change.modified_content, change.file_path)
+                "description": change.change_description,
+                "timestamp": change.timestamp.isoformat()
             }
-            for change in recent_changes
+            for change in self.code_history[-limit:]
         ]
-
-    async def search_and_scrape(self, query: str) -> List[SearchResult]:
-        """
-        Combined search and scrape operation
-        Search externally, then scrape the most relevant results
-        """
-        logger.info(f"Combined search and scrape for: {query}")
-        
-        # First, search externally
-        search_results = await self.search_external(query)
-        
-        # Then scrape the top results for more detailed content
-        enhanced_results = []
-        for result in search_results[:3]:  # Scrape top 3 results
-            if result.url:
-                scraped_content = await self.scraper(result.url)
-                if scraped_content:
-                    result.content = scraped_content[:2000]  # Limit content size
-                    result.source_type = "scraped"
-            enhanced_results.append(result)
-        
-        return enhanced_results
 
 # Global tool manager instance
 tool_manager = ToolManager()
 
 # Exported functions for use in agent nodes
-async def search_internal(query: str, file_types: List[str] = [".py", ".js", ".jsx", ".md"]) -> List[SearchResult]:
-    """Search internal workspace"""
+async def search_internal(query: str, file_types: List[str] = None) -> List[SearchResult]:
     return await tool_manager.search_internal(query, file_types)
 
 async def search_external(query: str, max_results: int = 5) -> List[SearchResult]:
-    """Search external sources"""
     return await tool_manager.search_external(query, max_results)
 
 async def scraper(url: str) -> Optional[str]:
-    """Scrape content from URL"""
     return await tool_manager.scraper(url)
 
 async def internal_write(file_path: str, content: str, change_description: str = "") -> bool:
-    """Write to internal files"""
     return await tool_manager.internal_write(file_path, content, change_description)
 
-async def search_and_scrape(query: str) -> List[SearchResult]:
-    """Combined search and scrape"""
-    return await tool_manager.search_and_scrape(query)
+async def analyze_code_with_llm(code: str, instruction: str) -> str:
+    return await tool_manager.analyze_code_with_llm(code, instruction)
 
 def get_code_history(limit: int = 10) -> List[Dict[str, Any]]:
-    """Get code change history"""
     return tool_manager.get_code_history(limit)
-
-async def analyze_code_with_llm(code: str, instruction: str) -> str:
-    """Analyze code with LLM"""
-    return await tool_manager.analyze_code_with_llm(code, instruction)

@@ -1,180 +1,150 @@
-"""
-Refactored Agent Graph for AgentCodeV2
-Implements intelligent routing based on request complexity.
-"""
 import asyncio
 import logging
 from typing import Dict, Any, Literal
-from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from state import AgentState, StepStatus, NodeType
-from planner import plan_next_step, validate_plan
+from state import AgentState, NodeType
+from planner import plan_task
 from developer import execute_next_step, answer_simple_inquiry
 from triage import assess_request_complexity
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class EnhancedAgentGraph:
+class AgentGraph:
     """
-    Enhanced agent workflow graph with intelligent routing.
+    The main agent workflow graph.
     """
     
     def __init__(self):
-        self.graph = None
-        self.memory_saver = MemorySaver()
-        self.build_graph()
-    
-    def build_graph(self):
-        """Build the enhanced agent workflow graph with routing."""
-        
+        self.memory = MemorySaver()
+        self.graph = self._build_graph()
+        logger.info("AgentGraph initialized.")
+
+    def _build_graph(self) -> StateGraph:
+        """Builds the agent workflow graph."""
         workflow = StateGraph(AgentState)
-        
-        # Add nodes for different routes
+
+        # Nodes
         workflow.add_node("triage", self.triage_node)
         workflow.add_node("simple_inquiry", self.simple_inquiry_node)
         workflow.add_node("planner", self.planner_node)
         workflow.add_node("developer", self.developer_node)
-        workflow.add_node("validator", self.validator_node)
-        
-        # Set entry point to the new triage node
+
+        # Edges
         workflow.set_entry_point("triage")
-        
-        # Add conditional edges for routing
         workflow.add_conditional_edges(
             "triage",
-            self.decide_route,
+            self.route_after_triage,
             {
                 "simple_inquiry": "simple_inquiry",
-                "complex_modification": "planner",
-                "research_and_implement": "planner", # Planner can handle research
-                "code_generation": "planner", # Planner is good for this too
-                "simple_modification": "planner",
+                "planner": "planner"
             }
         )
-
-        # Edges for the complex workflow
         workflow.add_edge("planner", "developer")
-        workflow.add_edge("developer", "validator")
         workflow.add_conditional_edges(
-            "validator",
-            self.decide_next_step,
+            "developer",
+            self.decide_after_developer,
             {
-                "continue": "planner",
-                "finish": END
+                "continue": "developer",
+                "end": END
             }
         )
-        
-        # Simple inquiry route ends after its node
         workflow.add_edge("simple_inquiry", END)
-
-        self.graph = workflow.compile(checkpointer=self.memory_saver)
+        
+        return workflow.compile(checkpointer=self.memory)
 
     async def triage_node(self, state: AgentState) -> AgentState:
-        """Assesses the user request and sets the route."""
-        state.log_message("Assessing request complexity...", NodeType.TRIAGE)
+        """Triage the request to determine the route."""
+        state.log_message("Triage started.", NodeType.TRIAGE)
         assessment = await assess_request_complexity(state)
-        state.route = assessment["route"]
-        state.complexity = assessment["complexity"]
-        state.log_message(f"Route determined: {state.route} (Complexity: {state.complexity})", NodeType.TRIAGE, assessment)
+        state.working_memory['triage_assessment'] = assessment
+        state.log_message(f"Triage complete: route={assessment['route']}", NodeType.TRIAGE)
         return state
 
-    def decide_route(self, state: AgentState) -> str:
-        """Determines the next node based on the triage assessment."""
-        return state.route
+    def route_after_triage(self, state: AgentState) -> Literal["simple_inquiry", "planner"]:
+        """Route based on triage assessment."""
+        route = state.working_memory.get('triage_assessment', {}).get('route', 'planner')
+        logger.info(f"Routing after triage: {route}")
+        if route == 'simple_inquiry':
+            return "simple_inquiry"
+        else:
+            # Correcting the routing logic to match the planner's expectation
+            return "planner"
 
     async def simple_inquiry_node(self, state: AgentState) -> AgentState:
-        """Handles simple, non-coding questions."""
-        state.log_message("Handling as a simple inquiry.", NodeType.SIMPLE_INQUIRY)
-        response = await answer_simple_inquiry(state)
-        state.final_explanation = response
-        state.task_complete = True
+        """Handle simple inquiries directly."""
+        state.log_message("Handling simple inquiry.", NodeType.SIMPLE_INQUIRY)
+        await answer_simple_inquiry(state)
+        state.log_message("Simple inquiry answered.", NodeType.SIMPLE_INQUIRY)
         return state
 
     async def planner_node(self, state: AgentState) -> AgentState:
-        """Plans the next step in the complex workflow."""
-        state.log_message("Planning next step...", NodeType.PLANNER)
-        await plan_next_step(state)
+        """Generate a plan to address the request."""
+        state.log_message("Planning started.", NodeType.PLANNER)
+        await plan_task(state)
         return state
 
     async def developer_node(self, state: AgentState) -> AgentState:
-        """Executes a step from the plan."""
-        state.log_message("Executing development step...", NodeType.DEVELOPER)
+        """Execute the next step in the plan."""
         await execute_next_step(state)
         return state
 
-    async def validator_node(self, state: AgentState) -> AgentState:
-        """Validates the current state and plan."""
-        state.log_message("Validating progress...", NodeType.VALIDATOR)
-        # For now, simple validation. This can be expanded.
-        if state.get_next_pending_step() is None:
-            state.planning_complete = True
-        return state
+    def decide_after_developer(self, state: AgentState) -> Literal["continue", "end"]:
+        """Decide whether to continue development or end."""
+        if state.task_complete or state.task_failed:
+            logger.info("Developer task finished or failed. Ending execution.")
+            return "end"
+        else:
+            logger.info("Developer task not yet complete. Continuing execution.")
+            return "continue"
 
-    def decide_next_step(self, state: AgentState) -> Literal["continue", "finish"]:
-        """Decides whether to continue planning or finish."""
-        if state.task_complete or state.task_failed or state.planning_complete:
-            return "finish"
-        if state.loop_count >= state.max_loops:
-            state.task_failed = True
-            state.log_message("Max loops reached. Ending execution.", NodeType.VALIDATOR)
-            return "finish"
-        return "continue"
-
-    async def execute_workflow(self, instruction: str, code: str, config: Dict = None) -> Dict[str, Any]:
-        """Execute the full agent workflow."""
-        if config is None:
-            config = {}
-        
-        # Create and initialize state properly
+    async def execute_workflow(self, instruction: str, code: str, stream_queue: asyncio.Queue) -> Dict[str, Any]:
+        """Executes the agent workflow and streams state updates."""
         initial_state = AgentState()
         initial_state.start_task(instruction, code)
-        thread = {"configurable": {"thread_id": initial_state.task_id}}
         
+        config = {"configurable": {"thread_id": initial_state.task_id}}
+        
+        final_state_result = None
         try:
-            final_state = initial_state  # Initialize with the initial state
-            async for event in self.graph.astream(initial_state, config=thread):
-                # Extract the actual state from the event
-                for node_name, state_data in event.items():
-                    if isinstance(state_data, AgentState):
-                        final_state = state_data
-                        break
-            
-            logger.info("Workflow execution completed")
-            return final_state.to_dict() if final_state else initial_state.to_dict()
-            
+            # Manually stream state updates from outside the graph logic
+            async for event in self.graph.astream(initial_state, config=config):
+                # The event dictionary contains the state of the node that just ran
+                node_name = next(iter(event))
+                if node_name != END:
+                    current_state = event[node_name]
+                    # Ensure we have an AgentState object before converting to dict
+                    if isinstance(current_state, AgentState):
+                         await stream_queue.put(current_state.to_dict())
+                
+                if END in event:
+                    final_state_result = event[END]
+
+            logger.info(f"Workflow execution completed for task {initial_state.task_id}")
+            # Ensure the final state is also streamed
+            if final_state_result and isinstance(final_state_result, AgentState):
+                await stream_queue.put(final_state_result.to_dict())
+            return final_state_result.to_dict() if final_state_result else initial_state.to_dict()
+
         except Exception as e:
-            logger.error(f"Workflow execution failed: {e}", exc_info=True)
+            logger.error(f"Workflow execution failed for task {initial_state.task_id}: {e}", exc_info=True)
             error_state = AgentState()
             error_state.start_task(instruction, code)
             error_state.task_failed = True
             error_state.failure_reason = str(e)
             error_state.log_message(f"Critical error: {e}", NodeType.TRIAGE)
+            
+            # Stream the final error state
+            await stream_queue.put(error_state.to_dict())
+            
             return error_state.to_dict()
 
 # Global agent graph instance
-agent_graph = EnhancedAgentGraph()
+agent_graph = AgentGraph()
 
-async def execute_agent_workflow(instruction: str, code: str = "", config: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Execute the agent workflow
-    """
-    if config is None:
-        config = {}
-    
-    try:
-        # Use the agent graph's execute_workflow method
-        result = await agent_graph.execute_workflow(instruction, code, config)
-        logger.info("Workflow execution completed")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Workflow execution failed: {e}", exc_info=True)
-        error_state = AgentState()
-        error_state.start_task(instruction, code)
-        error_state.task_failed = True
-        error_state.failure_reason = str(e)
-        error_state.log_message(f"Critical error: {e}", NodeType.TRIAGE)
-        return error_state.to_dict()
+async def execute_agent_workflow(instruction: str, code: str, stream_queue: asyncio.Queue) -> Dict[str, Any]:
+    """Entry point to execute the agent workflow."""
+    return await agent_graph.execute_workflow(instruction, code, stream_queue)
