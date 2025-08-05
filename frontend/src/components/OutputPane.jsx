@@ -1,34 +1,49 @@
 import React from 'react';
 
-export default function OutputPane({ output }) {
+// A helper to format the node type for display
+const formatNodeType = (node) => {
+  return node.charAt(0).toUpperCase() + node.slice(1).toLowerCase();
+};
+
+export default function OutputPane({ output, agentState }) {
+  // If agentState and its log exist, display the formatted log.
+  // Otherwise, fall back to the standard output prop (for pyodide or final explanation).
+  const hasAgentLog = agentState?.execution_log?.length > 0;
+
+  if (hasAgentLog) {
+    return (
+      <div>
+        {agentState.execution_log.map((log, i) => {
+          let color = '#d4d4d4';
+          let nodeColor = '#61afef'; // Default for Planner
+          if (log.node === 'DEVELOPER') nodeColor = '#c678dd';
+          if (log.node === 'TRIAGE') nodeColor = '#e5c07b';
+          if (log.status === 'failed') color = '#f48771';
+
+          return (
+            <div key={i} style={{ color, marginBottom: '4px', display: 'flex', alignItems: 'center' }}>
+              <span style={{ 
+                color: nodeColor, 
+                fontWeight: 'bold',
+                minWidth: '90px',
+                textAlign: 'right',
+                marginRight: '12px',
+                fontSize: '0.8em'
+              }}>
+                {formatNodeType(log.node)}
+              </span>
+              <span>{log.message}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Display standard output or final explanation
   return (
-    <div style={{ 
-      fontFamily: 'monospace',
-      fontSize: '14px',
-      lineHeight: '1.5',
-      color: '#d4d4d4'
-    }}>
-      {output.split('\n').map((line, i) => {
-        // Apply special formatting for different log types
-        let color = '#d4d4d4';
-        if (line.includes('ERROR') || line.includes('Error')) color = '#f48771';
-        if (line.includes('WARNING')) color = '#e5c07b';
-        if (line.includes('INFO')) color = '#61afef';
-        if (line.includes('SUCCESS') || line.includes('Completed')) color = '#98c379';
-        
-        return (
-          <div 
-            key={i} 
-            style={{
-              padding: '2px 0',
-              borderBottom: i === 0 ? 'none' : '1px solid #222',
-              color
-            }}
-          >
-            {line}
-          </div>
-        );
-      })}
+    <div style={{ whiteSpace: 'pre-wrap' }}>
+      {output}
     </div>
   );
 }

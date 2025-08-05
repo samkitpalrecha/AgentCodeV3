@@ -66,57 +66,52 @@ class AdvancedPlanner:
         logger.info("Generating full execution plan...")
         
         context_str = "\n".join([f"Title: {res.title}\nContent: {res.content[:300]}...\n" for res in search_results])
+        code_snippet = state.current_code[:2000] if state.current_code else "No code provided."
 
+        # CORRECTED: Build the prompt using an f-string directly, which is safer
+        # than .format() when the string contains many curly braces.
         prompt = f"""
         You are an expert AI planner. Your task is to create a detailed, step-by-step plan to address the user's request.
-        The plan should consist of a series of atomic, executable actions.
+        The final step of your plan MUST be a `finish` action.
 
         **User Instruction:**
         {state.user_instruction}
 
         **Current Code (if any):**
+        ```python
+        {code_snippet}
         ```
-        {state.current_code[:2000] if state.current_code else "No code provided."}
-        ```
-
-        **Relevant Information from Searches:**
-        {context_str if context_str else "No search results."}
 
         **Available Actions:**
-        - `search_internal(query)`: Search within the project files.
-        - `search_external(query)`: Search the web.
-        - `internal_write(file_path, content, change_description)`: Write or overwrite a file.
         - `analyze_code(code, instruction)`: Analyze a piece of code.
-        - `finish(final_explanation)`: Mark the task as complete.
+        - `finish(final_explanation, final_code)`: Mark the task as complete. This MUST be the last step.
 
-        **Instructions:**
-        - Break down the request into small, manageable steps.
-        - For each step, provide a clear description and the exact action to take.
-        - Think step-by-step and explain your reasoning for each step.
-        - Output the plan as a valid JSON array of objects. Each object should have 'description', 'action_type', and 'parameters' keys.
+        **CRITICAL INSTRUCTIONS:**
+        1.  Your output MUST be a valid JSON array of objects.
+        2.  The final object in the array MUST be an action of type `finish`.
+        3.  The `finish` action's parameters MUST contain a `final_explanation` key with a detailed explanation of the fix.
+        4.  The `finish` action's parameters MUST also contain a `final_code` key with the complete, corrected code.
 
-        **Example JSON Output:**
+        **Example of a perfect response:**
         ```json
         [
             {{
-                "description": "Search for how to implement a bubble sort in Python.",
-                "action_type": "search_external",
-                "parameters": {{"query": "python bubble sort implementation"}}
+                "description": "Analyze the Python code to find the syntax error.",
+                "action_type": "analyze_code",
+                "parameters": {{"code": "priint(\\"adfd\\")", "instruction": "Identify the typo in the function name."}}
             }},
             {{
-                "description": "Write the bubble sort implementation to 'sorter.py'.",
-                "action_type": "internal_write",
-                "parameters": {{"file_path": "sorter.py", "content": "def bubble_sort(arr):\\n  # ... implementation ...", "change_description": "Initial implementation of bubble sort."}}
-            }},
-            {{
-                "description": "Explain the implementation and finish the task.",
+                "description": "Provide the final explanation and the corrected code.",
                 "action_type": "finish",
-                "parameters": {{"final_explanation": "I have implemented the bubble sort algorithm in sorter.py."}}
+                "parameters": {{
+                    "final_explanation": "The code failed because `priint` is a typo. The correct function is `print`. I have corrected this in the final code.",
+                    "final_code": "print(\\"adfd\\")"
+                }}
             }}
         ]
         ```
 
-        Now, generate the plan for the user's request.
+        Now, generate the complete and valid JSON plan for the user's request.
         """
         
         try:

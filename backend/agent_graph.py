@@ -71,7 +71,7 @@ class AgentGraph:
         if route == 'simple_inquiry':
             return "simple_inquiry"
         else:
-            # Correcting the routing logic to match the planner's expectation
+            # All other routes (simple_modification, complex_modification, etc.) go to the planner.
             return "planner"
 
     async def simple_inquiry_node(self, state: AgentState) -> AgentState:

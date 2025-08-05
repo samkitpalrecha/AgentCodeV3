@@ -79,8 +79,6 @@ class AgentState:
     # System
     created_at: datetime = field(default_factory=datetime.now)
     metrics: AgentMetrics = field(default_factory=AgentMetrics)
-    
-    # NOTE: The stream_queue has been removed to ensure the state is serializable.
 
     def start_task(self, instruction: str, code: str):
         self.user_instruction = instruction
@@ -131,18 +129,18 @@ class AgentState:
                     "id": step.id,
                     "description": step.description,
                     "action_type": step.action_type,
-                    "status": step.status.value, # Convert Enum to string
+                    "status": step.status.value,
                     "reasoning": step.reasoning,
-                    "created_at": step.created_at.isoformat() # Convert datetime to string
+                    "created_at": step.created_at.isoformat() # **FIX**: Convert datetime to string
                 } for step in self.plan_steps
             ],
             "execution_log": [
                 {
-                    "timestamp": log.timestamp.isoformat(), # Convert datetime
-                    "node": log.node.value, # Convert Enum
+                    "timestamp": log.timestamp.isoformat(), # **FIX**: Convert datetime
+                    "node": log.node.value,
                     "message": log.message,
                     "details": log.details,
-                    "status": log.status.value if log.status else None # Convert Enum
+                    "status": log.status.value if log.status else None
                 } for log in self.execution_log[-20:]
             ],
             "progress": self.get_progress_summary(),
@@ -152,8 +150,8 @@ class AgentState:
             "final_code": self.final_code,
             "final_explanation": self.final_explanation,
             "metrics": {
-                "start_time": self.metrics.start_time.isoformat(), # Convert datetime
-                "end_time": self.metrics.end_time.isoformat() if self.metrics.end_time else None, # Convert datetime
+                "start_time": self.metrics.start_time.isoformat(), # **FIX**: Convert datetime
+                "end_time": self.metrics.end_time.isoformat() if self.metrics.end_time else None, # **FIX**: Convert datetime
                 "total_execution_time": self.metrics.total_execution_time,
                 "llm_calls": self.metrics.llm_calls,
                 "internal_searches": self.metrics.internal_searches,

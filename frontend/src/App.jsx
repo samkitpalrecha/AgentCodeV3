@@ -6,243 +6,115 @@ import OutputPane from './components/OutputPane';
 import ActivityBar from './components/ActivityBar';
 import FileExplorer from './components/FileExplorer';
 import { runPython } from './utils/pyodideRunner';
-import { callAgent, streamAgentExecution } from './utils/agentClient';
+import { streamAgentExecution } from './utils/agentClient';
 
 export default function App() {
   const [activeView, setActiveView] = useState('explorer');
   const [files, setFiles] = useState([
-    { id: 1, name: 'main.py', content: '# Write Python here' },
+    { id: 1, name: 'main.py', content: 'priint("adfd")' },
     { id: 2, name: 'utils.py', content: '# Utility functions' },
-    { id: 3, name: 'config.py', content: '# Configuration settings' }
   ]);
   const [activeFileId, setActiveFileId] = useState(1);
-  const [output, setOutput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentStep, setCurrentStep] = useState('');
+  const [output, setOutput] = useState('Output will appear here...');
+  const [isStreaming, setIsStreaming] = useState(false);
   
+  // This state will hold the entire agent object from the backend
+  const [agentState, setAgentState] = useState(null);
+  const agentStreamRef = useRef(null);
+
   const activeFile = files.find(file => file.id === activeFileId) || files[0];
-  const isMounted = useRef(true);
 
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
-
-  const handleRun = async () => {
-    setLoading(true);
-    setOutput('Running…');
-    try {
-      const result = await runPython(activeFile.content);
-      setOutput(result);
-    } catch (err) {
-      setOutput(`Error: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleExplain = async () => {
-    if (streaming) return;
-    
-    setLoading(true);
-    setStreaming(true);
-    setOutput('Starting agent execution...');
-    setProgress(0);
-    setCurrentStep('');
-    
-    try {
-      await streamAgentExecution(
-        activeFile.content, 
-        'Explain and improve this code',
-        (update) => {
-          if (!isMounted.current) return;
-          
-          switch (update.status) {
-            case 'processing':
-              setProgress(update.progress_percentage);
-              setCurrentStep(update.current_step || '');
-              if (update.logs && update.logs.length > 0) {
-                setOutput(update.logs.join('\n'));
-              }
-              break;
-              
-            case 'completed':
-              updateFileContent(activeFileId, update.final_code);
-              setOutput(
-                (update.execution_log || []).join('\n') || 
-                'Execution completed successfully'
-              );
-              setProgress(100);
-              setCurrentStep('Completed');
-              setStreaming(false);
-              setLoading(false);
-              break;
-              
-            case 'failed':
-            case 'error':
-              setOutput(`Error: ${update.error_message || 'Agent execution failed'}`);
-              setProgress(0);
-              setCurrentStep('Failed');
-              setStreaming(false);
-              setLoading(false);
-              break;
-          }
-        }
-      );
-    } catch (err) {
-      setOutput(`Error: ${err.message}`);
-      setStreaming(false);
-      setLoading(false);
-    }
-  };
-
-  const updateFileContent = (fileId, newContent) => {
+  const handleCodeChange = (newCode) => {
     setFiles(files.map(file => 
-      file.id === fileId ? {...file, content: newContent} : file
+      file.id === activeFileId ? { ...file, content: newCode } : file
     ));
   };
 
-  const createNewFile = () => {
-    const newId = Math.max(0, ...files.map(f => f.id)) + 1;
-    const newFile = {
-      id: newId,
-      name: `new_${newId}.py`,
-      content: '# New Python file'
-    };
-    setFiles([...files, newFile]);
-    setActiveFileId(newId);
+  const handleRunCode = async () => {
+    setOutput('Running Python code...');
+    const result = await runPython(activeFile.content);
+    setOutput(result);
+  };
+
+  const handleExplainAndImprove = () => {
+    if (isStreaming) {
+      agentStreamRef.current?.close();
+      setIsStreaming(false);
+      return;
+    }
+
+    setIsStreaming(true);
+    setAgentState(null); // Reset previous state
+    setOutput(''); // Clear old output
+
+    agentStreamRef.current = streamAgentExecution(
+      "Explain and improve this code",
+      activeFile.content,
+      (update) => {
+        // This is called for every update from the agent
+        setAgentState(update);
+        
+        // If the agent provides a final explanation, show it in the output pane
+        if (update.final_explanation) {
+            setOutput(update.final_explanation);
+        }
+
+        // **CODE REPLACEMENT LOGIC**
+        // If the task is complete and there's final code, update the editor immediately.
+        if (update.task_complete && update.final_code) {
+          handleCodeChange(update.final_code);
+          setIsStreaming(false); // Stop streaming visuals once complete
+        }
+      },
+      (error) => {
+        // This is called if an error occurs
+        console.error("Agent stream error:", error);
+        setOutput(`Agent Error: ${error.message}`);
+        setIsStreaming(false);
+      },
+      () => {
+        // This is called when the stream connection itself closes.
+        setIsStreaming(false);
+      }
+    );
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      height: '100vh',
-      overflow: 'hidden',
-      fontFamily: 'Segoe UI, Roboto, monospace',
-      backgroundColor: '#1e1e1e',
-      color: '#d4d4d4'
-    }}>
-      {/* Activity Bar */}
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#1e1e1e', color: '#d4d4d4' }}>
       <ActivityBar activeView={activeView} setActiveView={setActiveView} />
+      {activeView === 'explorer' && <FileExplorer files={files} activeFileId={activeFileId} setActiveFileId={setActiveFileId} />}
       
-      {/* File Explorer */}
-      {activeView === 'explorer' && (
-        <FileExplorer 
-          files={files}
-          activeFileId={activeFileId}
-          setActiveFileId={setActiveFileId}
-          onCreateFile={createNewFile}
-        />
-      )}
-      
-      {/* Main Content Area */}
-      <div style={{ 
-        flex: 1, 
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }}>
-        {/* Toolbar */}
-        <Toolbar onRun={handleRun} />
-        
-        {/* Agent Panel with Progress */}
-        <div style={{ 
-          height: '200px', 
-          borderBottom: '1px solid #333',
-          padding: '0.5rem'
-        }}>
-          <AgentPanel 
-            code={activeFile.content} 
-            onExplain={handleExplain} 
-            loading={loading || streaming}
-            progress={progress}
-            currentStep={currentStep}
-          />
-        </div>
-        
-        {/* Editor and Output Container */}
-        <div style={{ 
-          flex: 1, 
-          display: 'flex',
-          overflow: 'hidden'
-        }}>
-          {/* Code Editor */}
-          <div style={{ 
-            flex: 1, 
-            backgroundColor: '#1e1e1e', 
-            overflow: 'hidden'
-          }}>
-            <CodeEditor 
-              code={activeFile.content} 
-              onChange={(value) => updateFileContent(activeFileId, value)} 
-            />
-          </div>
-          
-          {/* Output Panel */}
-          <div style={{
-            width: '40%',
-            minWidth: '300px',
-            borderLeft: '1px solid #333',
-            backgroundColor: '#1e1e1e',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <Toolbar onRun={handleRunCode} />
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <div style={{ flex: 3, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1 }}>
+              <CodeEditor code={activeFile.content} onChange={handleCodeChange} />
+            </div>
             <div style={{
+              height: '40%',
+              borderTop: '1px solid #333',
               display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              margin: '1rem',
-              padding: '0.5rem',
-              borderBottom: '1px solid #444'
+              flexDirection: 'column',
+              backgroundColor: '#181818'
             }}>
-              <h3 style={{ 
-                color: '#fff',
-                margin: 0
-              }}>
+               <div style={{ padding: '8px', borderBottom: '1px solid #333', background: '#252526' }}>
                 Output
-              </h3>
-              {streaming && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}>
-                  <div style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '50%',
-                    background: '#007acc',
-                    animation: 'pulse 1.5s infinite'
-                  }} />
-                  <span style={{ fontSize: '0.9rem' }}>Agent Running</span>
-                </div>
-              )}
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '8px', fontFamily: 'monospace' }}>
+                <OutputPane output={output} agentState={agentState} />
+              </div>
             </div>
-            <div style={{
-              padding: '1rem',
-              flex: 1,
-              overflowY: 'auto',
-              backgroundColor: '#000',
-              fontFamily: 'monospace',
-              fontSize: '0.95rem'
-            }}>
-              <OutputPane output={output} />
-            </div>
+          </div>
+          <div style={{ flex: 1, borderLeft: '1px solid #333', backgroundColor: '#252526' }}>
+            <AgentPanel 
+              onExplain={handleExplainAndImprove} 
+              loading={isStreaming}
+              agentState={agentState}
+            />
           </div>
         </div>
       </div>
-      
-      {/* Animation styles */}
-      <style>{`
-        @keyframes pulse {
-          0% { opacity: 1; }
-          50% { opacity: 0.4; }
-          100% { opacity: 1; }
-        }
-      `}</style>
     </div>
   );
 }

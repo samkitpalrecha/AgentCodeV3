@@ -23,7 +23,7 @@ class AdvancedDeveloper:
     """
     
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.model = genai.GenerativeModel('gemini-2.5-flash')
         self.max_retries = 3
         logger.info("AdvancedDeveloper initialized with gemini-2.5-flash")
@@ -43,7 +43,7 @@ class AdvancedDeveloper:
         next_step.status = StepStatus.IN_PROGRESS
         
         try:
-            action_result = await self._execute_action(next_step)
+            action_result = await self._execute_action(state, next_step) # Pass state to execute_action
             
             if action_result.get("success", False):
                 next_step.status = StepStatus.COMPLETED
@@ -54,9 +54,9 @@ class AdvancedDeveloper:
                 # Special handling for the 'finish' action
                 if next_step.action_type == 'finish':
                     state.task_complete = True
+                    # The final explanation and code are now set here
                     state.final_explanation = next_step.parameters.get("final_explanation", "Task completed.")
-                    # The final code is the current state of the code
-                    state.final_code = state.current_code
+                    state.final_code = next_step.parameters.get("final_code", state.current_code)
 
             else:
                 next_step.status = StepStatus.FAILED
@@ -74,7 +74,7 @@ class AdvancedDeveloper:
             state.failure_reason = str(e)
             return False
 
-    async def _execute_action(self, step: PlanStep) -> Dict[str, Any]:
+    async def _execute_action(self, state: AgentState, step: PlanStep) -> Dict[str, Any]:
         """Dynamically executes the action specified in a plan step."""
         action = step.action_type
         params = step.parameters
@@ -89,6 +89,9 @@ class AdvancedDeveloper:
                 return {"success": True, "result": [r.__dict__ for r in result]}
             elif action == 'internal_write':
                 success = await internal_write(**params)
+                # After writing, update the current_code in the state
+                if success:
+                    state.current_code = params.get('content', state.current_code)
                 return {"success": success}
             elif action == 'analyze_code':
                 result = await analyze_code_with_llm(**params)
