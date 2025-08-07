@@ -49,6 +49,24 @@ export default function App() {
     }
   };
 
+  // Add the missing acceptCodeChange function
+  const acceptCodeChange = () => {
+    if (pendingCodeChange) {
+      handleCodeChange(pendingCodeChange.modified);
+      setShowDiff(false);
+      setPendingCodeChange(null);
+      // Optionally show a success message
+      setOutput('✅ Code changes accepted and applied');
+    }
+  };
+
+  // Add the missing rejectCodeChange function
+  const rejectCodeChange = () => {
+    setShowDiff(false);
+    setPendingCodeChange(null);
+    setOutput('❌ Code changes rejected');
+  };
+
   const executeAgentAction = (instruction, mode = 'explain') => {
     if (isAgentRunning) {
       agentStreamRef.current?.close();
@@ -170,7 +188,7 @@ export default function App() {
     const intents = [
       {
         name: 'code_fix',
-        keywords: ['fix', 'error', 'bug', 'issue', 'problem', 'debug', 'crash', 'broken', 'not working', 'why doesn’t'],
+        keywords: ['fix', 'error', 'bug', 'issue', 'problem', 'debug', 'crash', 'broken', 'not working', 'why doesn\'t'],
         shouldIncludeCode: true,
         systemPrompt: (file, message) =>
           `The user is reporting a problem with their code and asking for help fixing it.\n\nCurrent code:\n\`\`\`python\n${file.content}\n\`\`\`\n\nUser's message: "${message}"`
