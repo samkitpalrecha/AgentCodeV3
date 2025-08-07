@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CodeEditor from './components/CodeEditor';
 import EnhancedToolbar from './components/Toolbar';
-import EnhancedAgentPanel from './components/AgentPanel';
-import SmartOutputPane from './components/OutputPane';
+import ChatPanel from './components/ChatPanel';
+import OutputPane from './components/OutputPane';
 import ActivityBar from './components/ActivityBar';
 import FileExplorer from './components/FileExplorer';
 import AIChat from './components/AiChat';
 import DiffView from './components/DiffView';
 import StatusBar from './components/StatusBar';
+import ExplanationPane from './components/ExplanationPane';
 import { runPython } from './utils/pyodideRunner';
 import { streamAgentExecution } from './utils/agentClient';
 
@@ -18,14 +19,16 @@ export default function App() {
     { id: 2, name: 'utils.py', content: '# Utility functions\n\ndef helper():\n    pass', language: 'python' },
   ]);
   const [activeFileId, setActiveFileId] = useState(1);
-  const [output, setOutput] = useState('Output will appear here...');
+  const [output, setOutput] = useState('');
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [agentState, setAgentState] = useState(null);
   const [showDiff, setShowDiff] = useState(false);
   const [pendingCodeChange, setPendingCodeChange] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
   const [showChat, setShowChat] = useState(false);
-  const [agentMode, setAgentMode] = useState('explain'); // 'explain', 'fix', 'chat'
+  const [agentMode, setAgentMode] = useState('explain');
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [showExplanation, setShowExplanation] = useState(false);
   const agentStreamRef = useRef(null);
 
   const activeFile = files.find(file => file.id === activeFileId) || files[0];
@@ -56,9 +59,20 @@ export default function App() {
     setIsAgentRunning(true);
     setAgentState(null);
     setAgentMode(mode);
-    setOutput('🤖 Agent is analyzing your code...');
     setShowDiff(false);
     setPendingCodeChange(null);
+    setShowExplanation(false);
+    setAiExplanation('');
+
+    // For chat mode, add thinking message
+    if (mode === 'chat') {
+      setChatHistory(prev => [...prev, { 
+        role: 'assistant', 
+        content: '🤖 Thinking...', 
+        timestamp: Date.now(),
+        isThinking: true
+      }]);
+    }
 
     agentStreamRef.current = streamAgentExecution(
       instruction,
@@ -66,36 +80,40 @@ export default function App() {
       (update) => {
         setAgentState(update);
         
-        // Update output with final explanation
-        if (update.final_explanation) {
-          setOutput(update.final_explanation);
-        }
-
         // Handle completion based on mode
-        if (update.task_complete && update.final_code) {
+        if (update.task_complete && update.final_explanation) {
           if (mode === 'fix') {
             // Auto-apply for fix mode
-            handleCodeChange(update.final_code);
-            setOutput(`✅ Code automatically fixed!\n\n${update.final_explanation}`);
+            if (update.final_code) {
+              handleCodeChange(update.final_code);
+            }
+            setAiExplanation(update.final_explanation);
+            setShowExplanation(true);
           } else if (mode === 'explain') {
-            // Show diff for explain mode
-            setPendingCodeChange({
-              original: activeFile.content,
-              modified: update.final_code,
-              explanation: update.final_explanation,
-              fileName: activeFile.name
-            });
-            setShowDiff(true);
+            // Show explanation and optionally diff for explain mode
+            setAiExplanation(update.final_explanation);
+            setShowExplanation(true);
+            
+            if (update.final_code && update.final_code !== activeFile.content) {
+              setPendingCodeChange({
+                original: activeFile.content,
+                modified: update.final_code,
+                explanation: update.final_explanation,
+                fileName: activeFile.name
+              });
+              setShowDiff(true);
+            }
           } else if (mode === 'chat') {
             // Update chat history
             setChatHistory(prev => {
               const newHistory = [...prev];
               const lastMessage = newHistory[newHistory.length - 1];
-              if (lastMessage?.role === 'assistant' && lastMessage.content.includes('🤖 Thinking...')) {
+              if (lastMessage?.isThinking) {
                 newHistory[newHistory.length - 1] = {
-                  ...lastMessage,
+                  role: 'assistant',
                   content: update.final_explanation,
-                  code: update.final_code
+                  code: update.final_code,
+                  timestamp: Date.now()
                 };
               }
               return newHistory;
@@ -106,7 +124,23 @@ export default function App() {
       },
       (error) => {
         console.error("Agent stream error:", error);
-        setOutput(`❌ Agent Error: ${error.message}`);
+        if (mode === 'chat') {
+          setChatHistory(prev => {
+            const newHistory = [...prev];
+            const lastMessage = newHistory[newHistory.length - 1];
+            if (lastMessage?.isThinking) {
+              newHistory[newHistory.length - 1] = {
+                role: 'assistant',
+                content: `❌ Sorry, I encountered an error: ${error.message}`,
+                timestamp: Date.now()
+              };
+            }
+            return newHistory;
+          });
+        } else {
+          setAiExplanation(`❌ Agent Error: ${error.message}`);
+          setShowExplanation(true);
+        }
         setIsAgentRunning(false);
       },
       () => {
@@ -124,29 +158,84 @@ export default function App() {
   };
 
   const handleChatMessage = (message) => {
-    const newMessage = { role: 'user', content: message, timestamp: Date.now() };
+    const newMessage = {
+      role: 'user',
+      content: message,
+      timestamp: Date.now()
+    };
     setChatHistory(prev => [...prev, newMessage]);
-    
-    // Add agent response placeholder
-    setChatHistory(prev => [...prev, { role: 'assistant', content: '🤖 Thinking...', timestamp: Date.now() }]);
-    
-    // Execute agent with chat context
-    executeAgentAction(`User question: ${message}. Please provide a helpful response based on the current code context.`, 'chat');
-  };
 
-  const acceptCodeChange = () => {
-    if (pendingCodeChange) {
-      handleCodeChange(pendingCodeChange.modified);
-      setShowDiff(false);
-      setPendingCodeChange(null);
-      setOutput(`✅ Code changes accepted and applied!\n\n${pendingCodeChange.explanation}`);
-    }
-  };
+    const lowerMessage = message.toLowerCase();
 
-  const rejectCodeChange = () => {
-    setShowDiff(false);
-    setPendingCodeChange(null);
-    setOutput('❌ Code changes rejected. Your original code remains unchanged.');
+    const intents = [
+      {
+        name: 'code_fix',
+        keywords: ['fix', 'error', 'bug', 'issue', 'problem', 'debug', 'crash', 'broken', 'not working', 'why doesn’t'],
+        shouldIncludeCode: true,
+        systemPrompt: (file, message) =>
+          `The user is reporting a problem with their code and asking for help fixing it.\n\nCurrent code:\n\`\`\`python\n${file.content}\n\`\`\`\n\nUser's message: "${message}"`
+      },
+      {
+        name: 'code_explanation',
+        keywords: ['explain', 'how does', 'what does', 'understand', 'meaning', 'clarify', 'why'],
+        shouldIncludeCode: true,
+        systemPrompt: (file, message) =>
+          `The user wants an explanation of the following code:\n\`\`\`python\n${file.content}\n\`\`\`\n\nUser's message: "${message}"`
+      },
+      {
+        name: 'feature_request',
+        keywords: ['add', 'create', 'implement', 'build', 'enhance', 'support', 'make it do'],
+        shouldIncludeCode: true,
+        systemPrompt: (file, message) =>
+          `The user wants to add or build a feature in their current codebase.\n\nCode:\n\`\`\`python\n${file.content}\n\`\`\`\n\nUser's message: "${message}"`
+      },
+      {
+        name: 'code_review',
+        keywords: ['review', 'feedback', 'evaluate', 'assess'],
+        shouldIncludeCode: true,
+        systemPrompt: (file, message) =>
+          `The user is asking for feedback on their code.\n\nPlease review the following code and provide constructive suggestions:\n\`\`\`python\n${file.content}\n\`\`\`\n\nUser's message: "${message}"`
+      },
+      {
+        name: 'general_greeting',
+        keywords: ['hi', 'hello', 'hey', 'good morning', 'good evening'],
+        shouldIncludeCode: false,
+        systemPrompt: (_, message) =>
+          `The user is greeting you. Respond in a friendly and conversational manner.\n\nUser's message: "${message}"`
+      },
+      {
+        name: 'general_question',
+        keywords: [],
+        shouldIncludeCode: true,
+        systemPrompt: (file, message) =>
+          `The user has a general programming-related question. Provide helpful assistance.\n\nContext:\n\`\`\`python\n${file.content}\n\`\`\`\n\nUser's message: "${message}"`
+      }
+    ];
+
+    const detectIntent = () => {
+      for (let intent of intents) {
+        for (let keyword of intent.keywords) {
+          if (lowerMessage.includes(keyword)) {
+            return intent;
+          }
+        }
+      }
+      return intents.find(i => i.name === 'general_question'); // fallback
+    };
+
+    const intent = detectIntent();
+    const systemPrompt = intent.systemPrompt(activeFile, message);
+
+    const chatInstruction = `
+  You are a helpful AI assistant integrated into a developer's IDE.
+  Your job is to assist with code-related questions, provide fixes, explain functionality, and help build features.
+
+  ${systemPrompt}
+
+  Please respond naturally and intelligently. If you include code in your response, ensure it's accurate, minimal, and tailored to their message.
+  `.trim();
+
+    executeAgentAction(chatInstruction, 'chat');
   };
 
   const createNewFile = () => {
@@ -159,6 +248,11 @@ export default function App() {
     };
     setFiles([...files, newFile]);
     setActiveFileId(newId);
+  };
+
+  const closeExplanation = () => {
+    setShowExplanation(false);
+    setAiExplanation('');
   };
 
   return (
@@ -220,26 +314,42 @@ export default function App() {
               flexDirection: 'column',
               backgroundColor: '#181818'
             }}>
-               <div style={{ padding: '8px 16px', borderBottom: '1px solid #333', background: '#252526', fontSize: '14px', fontWeight: '600' }}>
-                Output
+              {/* AI Explanation Section */}
+              {showExplanation && (
+                <ExplanationPane 
+                  explanation={aiExplanation}
+                  onClose={closeExplanation}
+                  isLoading={isAgentRunning && (agentMode === 'explain' || agentMode === 'fix')}
+                />
+              )}
+              
+              {/* Output Section */}
+              <div style={{ 
+                padding: '8px 16px', 
+                borderBottom: '1px solid #333', 
+                background: '#252526', 
+                fontSize: '14px', 
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span>📟</span>
+                Code Output
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
-                <SmartOutputPane 
+                <OutputPane 
                   output={output}
-                  agentState={agentState}
-                  isAgentRunning={isAgentRunning}
-                  agentMode={agentMode}
                 />
               </div>
             </div>
           </div>
           
           <div style={{ flex: 1, borderLeft: '1px solid #333', backgroundColor: '#252526' }}>
-            <EnhancedAgentPanel 
-              agentState={agentState}
-              isAgentRunning={isAgentRunning}
-              onExplain={handleExplainAndImprove}
-              onAutoFix={handleAutoFix}
+            <ChatPanel 
+              chatHistory={chatHistory}
+              onSendMessage={handleChatMessage}
+              isAgentRunning={isAgentRunning && agentMode === 'chat'}
             />
           </div>
         </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function DiffView({ original, modified, explanation, fileName, onAccept, onReject }) {
+export default function DiffView({ original, modified, fileName, onAccept, onReject }) {
   const getDiffLines = (originalText, modifiedText) => {
     const originalLines = originalText.split('\n');
     const modifiedLines = modifiedText.split('\n');
@@ -54,7 +54,7 @@ export default function DiffView({ original, modified, explanation, fileName, on
           fontWeight: '600'
         }}>
           <span>📄</span>
-          <span>{fileName} - AI Code Suggestions</span>
+          <span>{fileName} - Code Changes Preview</span>
         </div>
         
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -221,38 +221,6 @@ export default function DiffView({ original, modified, explanation, fileName, on
           </div>
         </div>
       </div>
-
-      {/* Explanation Panel */}
-      {explanation && (
-        <div style={{
-          padding: '16px',
-          backgroundColor: '#252526',
-          borderTop: '1px solid #333',
-          maxHeight: '150px',
-          overflowY: 'auto'
-        }}>
-          <div style={{
-            fontSize: '13px',
-            fontWeight: '600',
-            color: '#fff',
-            marginBottom: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <span>💡</span>
-            AI Explanation
-          </div>
-          <div style={{
-            fontSize: '13px',
-            color: '#ccc',
-            lineHeight: '1.5',
-            whiteSpace: 'pre-wrap'
-          }}>
-            {explanation}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
