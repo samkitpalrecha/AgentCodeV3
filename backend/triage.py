@@ -13,7 +13,7 @@ class TriageAgent:
     """TriageAgent classifies incoming requests to optimize the workflow."""
 
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.model = genai.GenerativeModel('gemini-2.5-flash')
         logger.info("TriageAgent initialized with gemini-2.5-flash")
 

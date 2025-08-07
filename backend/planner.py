@@ -18,7 +18,7 @@ class AdvancedPlanner:
     """
     
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.model = genai.GenerativeModel('gemini-2.5-flash')
         self.max_planning_loops = 5
         logger.info("AdvancedPlanner initialized with gemini-2.5-flash")

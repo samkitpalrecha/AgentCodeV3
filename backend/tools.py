@@ -54,7 +54,7 @@ class ToolManager:
     def setup_apis(self):
         """Initialize API clients"""
         self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.model = genai.GenerativeModel('gemini-2.5-flash')
         logger.info("API clients initialized with gemini-2.5-flash")
 
