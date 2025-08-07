@@ -14,11 +14,14 @@ export function streamAgentExecution(instruction, code, onUpdate, onError, onCom
 
   const stream = async () => {
     try {
+      console.log('Starting agent stream...', { instruction: instruction.substring(0, 50) });
+      
       const response = await fetch('http://localhost:8000/agent/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'text/event-stream'
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache'
         },
         body: JSON.stringify({
           instruction: instruction,
@@ -28,17 +31,26 @@ export function streamAgentExecution(instruction, code, onUpdate, onError, onCom
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: `API Error: ${response.status}` }));
-        throw new Error(errorData.detail);
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch {
+          errorData = { detail: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        throw new Error(errorData.detail || `Server error: ${response.status}`);
       }
 
+      console.log('Response received, starting to read stream...');
+      
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let updateCount = 0;
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) {
+          console.log(`Stream completed. Received ${updateCount} updates.`);
           if (onComplete) onComplete();
           break;
         }
@@ -49,13 +61,28 @@ export function streamAgentExecution(instruction, code, onUpdate, onError, onCom
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6);
-            try {
-              const update = JSON.parse(jsonStr);
-              if (onUpdate) onUpdate(update);
-            } catch (e) {
-              console.error('Failed to parse stream data:', jsonStr, e);
-              if (onError) onError(e);
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr) {
+              try {
+                const update = JSON.parse(jsonStr);
+                updateCount++;
+                
+                // Skip heartbeat messages from logging
+                if (!update.heartbeat) {
+                  console.log(`Update #${updateCount}:`, {
+                    taskId: update.task_id,
+                    complete: update.task_complete,
+                    failed: update.task_failed,
+                    progress: update.progress?.percentage
+                  });
+                }
+                
+                // Always call onUpdate, even for heartbeats (frontend can filter)
+                if (onUpdate) onUpdate(update);
+              } catch (e) {
+                console.error('Failed to parse stream data:', jsonStr, e);
+                if (onError) onError(new Error(`Failed to parse server response: ${e.message}`));
+              }
             }
           }
         }
@@ -64,6 +91,8 @@ export function streamAgentExecution(instruction, code, onUpdate, onError, onCom
       if (error.name !== 'AbortError') {
         console.error("Streaming API call failed:", error);
         if (onError) onError(error);
+      } else {
+        console.log('Stream aborted by user');
       }
     }
   };
@@ -73,6 +102,7 @@ export function streamAgentExecution(instruction, code, onUpdate, onError, onCom
   // Return an object with a 'close' method to allow aborting the fetch request
   return {
     close: () => {
+      console.log('Closing agent stream...');
       controller.abort();
     }
   };
