@@ -119,7 +119,7 @@ export default function EnhancedToolbar({ onRun, onExplain, onAutoFix, isAgentRu
         </button>
 
         {/* Test Button (Disabled) */}
-        <button 
+        {/* <button 
           disabled
           style={{
             padding: '8px 16px',
@@ -137,7 +137,7 @@ export default function EnhancedToolbar({ onRun, onExplain, onAutoFix, isAgentRu
         >
           <span style={{ fontSize: '12px' }}>✅</span>
           Test
-        </button>
+        </button> */}
       </div>
 
       {/* Active File Info */}
