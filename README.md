@@ -120,7 +120,6 @@ AgentCodeV3/
 ---
 
 ![alt text](image.png)
-
 ---
 
 ## Limitations
