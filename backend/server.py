@@ -14,6 +14,7 @@ import uvicorn
 
 from agent_graph import execute_agent_workflow
 from state import AgentState
+from completion import CodeCompletionService, CompletionRequest, CompletionResponse
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -39,10 +40,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize completion service with Groq API
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+completion_service = CodeCompletionService(groq_api_key=GROQ_API_KEY)
+
+@app.post("/completion", response_model=CompletionResponse)
+async def get_code_completions(request: CompletionRequest):
+    """
+    Get code completion suggestions for the given context and prefix.
+    Now powered by Groq's Llama-3.1-8b-instant for lightweight, fast completions.
+    """
+    try:
+        logger.info(f"Completion request for prefix: '{request.prefix}' at line {request.line}")
+        response = await completion_service.get_completions(request)
+        logger.info(f"Returning {len(response.suggestions)} completions from {response.provider}")
+        return response
+    except Exception as e:
+        logger.error(f"Completion error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Completion failed: {str(e)}")
+
 @app.post("/agent/stream")
 async def agent_stream(request: AgentRequest):
     """
     Main endpoint to interact with the agent, with real-time streaming of progress.
+    This continues to use Gemini-2.5-flash for the main workflow.
     """
     task_id = str(uuid.uuid4())
     logger.info(f"Streaming agent request received: {task_id}")
@@ -143,11 +164,16 @@ async def agent_stream(request: AgentRequest):
 
 @app.get("/")
 def read_root():
-    return {"message": "Agentic Code Editor Backend is running."}
+    return {"message": "Agentic Code Editor Backend is running with Groq-powered completions."}
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now().isoformat(),
+        "completion_provider": "groq-llama-3.1-8b",
+        "workflow_provider": "gemini-2.5-flash"
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

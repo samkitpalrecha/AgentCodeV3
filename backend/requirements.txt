@@ -9,3 +9,4 @@ unidiff
 aiohttp
 tavily-python
 google-generativeai
+groq
