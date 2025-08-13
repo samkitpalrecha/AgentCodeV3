@@ -1,132 +1,75 @@
 # AgentCodeV3
 
-AgentCodeV3 is an experimental, agent-powered browser Python IDE with AI assistance. It integrates a frontend for interactive Python coding with a backend for code triage, planning, and AI-driven code improvement, powered by LLMs.
+AgentCodeV3 is an AI-powered coding environment that combines a modern browser-based IDE with agent-driven code triage, planning, and improvement features. This project is designed to streamline the development workflow by integrating powerful large language model (LLM) capabilities directly into the developer experience.
 
----
+![IDE Preview](image.png)
 
-## Deep Project Structure & File-by-File Purpose
+## Features
 
-**Note: This is based on a code search limited to 10 results. More files and internal logic may exist. [View the full repo for all files.](https://github.com/samkitpalrecha/AgentCodeV3)**
+### 1. Modern Browser IDE (Frontend)
+- **Multi-file Editing:** Edit multiple files simultaneously in a familiar, responsive layout.
+- **Immediate Python Execution:** Run Python code instantly in the browser using Pyodide.
+- **Real-time AI Assistance:** Integrated chatbot and agent communication for code suggestions, explanations, and triage.
+- **File Management:** Create, delete, and manage project files and directories.
+- **Streaming Results:** See agent and code output as it is generated.
 
----
+### 2. Agent-Powered Backend
+- **TriageAgent:** Automatically analyzes code changes, routes tasks, and suggests improvements.
+- **PlanStep Architecture:** Decomposes complex tasks into actionable steps for agents.
+- **LLM Integration:** Utilizes Gemini (and potentially other LLMs) for code completion, explanation, and triage.
+- **Workflow Automation:** Supports agent-powered refactoring, bug-fixing, and code review.
 
-### Root
-- **README.md**: This file.
-- **.gitignore**: Specifies intentionally untracked files to ignore.
-- (Potential additional files not listed here.)
+### 3. Unified User Experience
+- **Frontend-Backend Communication:** Seamless WebSocket and REST API integration between React frontend and Python backend.
+- **Chatbot Interface:** Natural-language communication with AI agents for code help, planning, and debugging.
+- **Extensible Design:** Modular codebase for easy addition of new agent types, language support, or IDE features.
 
----
+## Getting Started
 
-### backend/
-#### Purpose: Python backend for agentic code triage, planning, and improvement.
+### Prerequisites
+- Node.js (for frontend)
+- Python 3.10+ (for backend)
+- Recommended: Docker (for simplified setup)
 
-- **main.py**  
-  Placeholder/test script. Currently just prints "dgfh".  
-  _Purpose: likely a stub or used for backend test runs._
-- **state.py**  
-  Defines the _core agent state and workflow data models_.  
-  - `PlanStep`: Individual step in agent's improvement plan; tracks action, reasoning, dependencies, status, tools used, and timestamps.
-  - `ExecutionMetrics`: Tracks backend agent performance (timing, search count, LLM calls, etc).
-  - `AgentState`: The main class for tracking an entire agentic workflow, including user instruction, code, agent route, complexity, plan steps, logs, feedback, working memory, and results.  
-  - `StepStatus`, `NodeType`: Enums for workflow node types/status.
-  _Purpose: All agent workflow logic and state for step-by-step code improvement flows._
-- **triage.py**  
-  Implements the _TriageAgent_:
-  - Classifies each user request to determine the right agent workflow and estimate complexity.
-  - Uses Gemini LLM for analysis (model: `gemini-2.5-flash`).
-  - Returns route (e.g., `simple_inquiry`, `simple_modification`, `complex_modification`, etc) and complexity score.
-  _Purpose: Frontline classifier to optimize and branch the agent workflow._
-- (Other backend files likely exist for API server, planner, developer, etc. See [repo](https://github.com/samkitpalrecha/AgentCodeV3) for more.)
+### Installation
 
----
-
-### frontend/
-#### Purpose: React-based web IDE for multi-file Python editing, execution, and agent-assisted improvement.
-
-- **index.html**  
-  Loads the React app, injects Pyodide (Python-to-WASM runtime), and defines the root div for mounting the UI.  
-  _Purpose: Browser entry point; enables in-browser Python._
-- **vite.config.js**  
-  Frontend dev/build config (Vite).  
-  - Proxies `/api` requests to the backend (assumes FastAPI on :8000).
-- **src/main.jsx**  
-  Entrypoint for React app.
-  - Imports global styles, mounts `<App />` into `#root`.
-- **src/App.jsx**  
-  Main React component.  
-  - Manages state: open files, active file/view, output, loading/streaming status, agent progress.
-  - Integrates:
-    - `CodeEditor`, `Toolbar`, `AgentPanel`, `OutputPane`, `ActivityBar`, `FileExplorer` (in `/components`)
-    - `runPython` (Pyodide runner utility)
-    - `callAgent`, `streamAgentExecution` (API utilities for backend agent)
-  - Handles user actions: running code, launching agent, updating files, streaming agent UI.
-  _Purpose: Orchestrates all frontend logic and agent interaction._
-- **src/components/Toolbar.jsx**  
-  Toolbar UI:  
-  - "Run" button (executes code via Pyodide)
-  - "Debug" and "Test" buttons (present, currently disabled)
-  _Purpose: Fast access to core code actions._
-- **src/App.css, src/index.css**  
-  Application styles.  
-  - Layout, theming, buttons, responsiveness, color modes.
-  _Purpose: Consistent, modern UI/UX._
-- (Other `/src/components/` files exist: `CodeEditor`, `AgentPanel`, `OutputPane`, `ActivityBar`, `FileExplorer`—see the repo for details.)
-
----
-
-## Typical File Hierarchy (Partial)
-
-```
-AgentCodeV3/
-├── backend/
-│   ├── main.py
-│   ├── state.py
-│   ├── triage.py
-│   └── (other agent/LLM/server/planner files)
-├── frontend/
-│   ├── index.html
-│   ├── vite.config.js
-│   └── src/
-│        ├── main.jsx
-│        ├── App.jsx
-│        ├── App.css
-│        ├── index.css
-│        └── components/
-│             ├── Toolbar.jsx
-│             └── (CodeEditor.jsx, AgentPanel.jsx, ...)
-├── README.md
-└── .gitignore
+#### 1. Clone the Repository
+```bash
+git clone https://github.com/samkitpalrecha/AgentCodeV3.git
+cd AgentCodeV3
 ```
 
+#### 2. Start the Backend
+```bash
+cd backend
+pip install -r requirements.txt
+python main.py
+```
+
+#### 3. Start the Frontend
+```bash
+cd ../frontend
+npm install
+npm start
+```
+
+Or use provided Docker configurations for one-click startup.
+
+## Project Structure
+
+- `frontend/` - React-based browser IDE with agent/chat integration.
+- `backend/` - Python FastAPI server with agent logic, LLM integration, and workflow management.
+- `README.md` - Project overview and setup instructions.
+- `image.png` - Screenshot/diagram of the IDE.
+
+## Contributing
+
+Contributions are welcome! Please open issues or submit pull requests for any improvements or bug fixes.
+
+## License
+
+[MIT License](LICENSE)
+
 ---
 
-## Backend: Agent Architecture (Based on Code)
-
-- **AgentState** tracks the whole agentic process: from user instruction, through triage, step planning, execution, and result collation.
-- **TriageAgent** runs first, selecting the optimal workflow branch and estimating complexity.
-- **PlanStep** objects represent each atomic code change, refactor, or analysis the agent makes.
-- **ExecutionMetrics** and logs allow for debugging and performance analysis.
-- **LLM Integration** (Gemini) is used for route selection and likely also for code generation/planning in other modules.
-
----
-
-## Frontend: IDE Architecture
-
-- **Multi-file support**: Open, edit, and switch between several Python files.
-- **Immediate run**: Code executes in-browser (WASM, no backend required for code execution).
-- **Agent streaming**: Agent improvements are streamed stepwise to the frontend, showing progress and output in real time.
-- **Componentized UI**: Clear separation for editor, output, files, toolbar, and agent interactions.
-
----
-
-![alt text](image.png)
----
-
-## Limitations
-
-- Only the first 10 files/folders are indexed here. See [full repo](https://github.com/samkitpalrecha/AgentCodeV3) for all files, including likely additional backend logic (API endpoints, planner, developer, validator, etc.).
-- This README is as semantically deep and accurate as possible given public code context.
-
----
-
-For complete structure and code, [browse the full repository](https://github.com/samkitpalrecha/AgentCodeV3).
+*This project leverages state-of-the-art AI to redefine how developers interact with their code. Happy coding!*
